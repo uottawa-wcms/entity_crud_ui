@@ -1,0 +1,61 @@
+<?php
+
+function entity_crud_ui_patch_node_redirect_link($op, $first_arg = NULL) {
+  $destination = NULL;
+  switch ($op) {
+    case 'node add':
+      if (empty($first_arg)) {
+        $destination = 'entity/node/add';
+      } else {
+        $destination = 'entity/node/' . $first_arg . '/add';
+      }
+      break;
+    case 'node edit':
+      $destination = 'entity/node/' . $first_arg->nid . '/edit';
+      break;
+    case 'node delete':
+      $destination = 'entity/node/' . $first_arg->nid . '/delete';
+      break;
+    case 'node revise':
+      $destination = 'entity/node/' . $first_arg->nid . '/revisions';
+      break;
+  }
+  if (!empty($destination)) {
+    unset($_GET['destination']);
+    drupal_goto($destination);
+  } else {
+    drupal_set_message(t('Unknown operation: !op', array('!op' => $op)));
+    return '';
+  }
+}
+
+function entity_crud_ui_patch_node_menu_alter(&$menu) {
+  $menu['node/add']['page callback'] = 'entity_crud_ui_patch_node_redirect_link';
+  $menu['node/add']['page arguments'] = array('node add');
+  $menu['node/add']['file'] = 'entity_crud_ui_patch_node.module';
+  $menu['node/add']['module'] = 'entity_crud_ui_patch_node';
+
+  $types = node_type_get_types();
+  foreach (array_keys($types) as $type) {
+    $menu['node/add/' . $type]['page callback'] = 'entity_crud_ui_patch_node_redirect_link';
+    $menu['node/add/' . $type]['page arguments'] = array('node add', $type);
+    $menu['node/add/' . $type]['file'] = 'entity_crud_ui_patch_node.module';
+    $menu['node/add/' . $type]['module'] = 'entity_crud_ui_patch_node';
+  }
+
+  $menu['node/%node/edit']['page callback'] = 'entity_crud_ui_patch_node_redirect_link';
+  $menu['node/%node/edit']['page arguments'] = array('node edit', 1);
+  $menu['node/%node/edit']['file'] = 'entity_crud_ui_patch_node.module';
+  $menu['node/%node/edit']['module'] = 'entity_crud_ui_patch_node';
+
+  $menu['node/%node/delete']['page callback'] = 'entity_crud_ui_patch_node_redirect_link';
+  $menu['node/%node/delete']['page arguments'] = array('node delete', 1);
+  $menu['node/%node/delete']['file'] = 'entity_crud_ui_patch_node.module';
+  $menu['node/%node/delete']['module'] = 'entity_crud_ui_patch_node';
+
+  $menu['node/%node/revisions']['page callback'] = 'entity_crud_ui_patch_node_redirect_link';
+  $menu['node/%node/revisions']['page arguments'] = array('node revise', 1);
+  $menu['node/%node/revisions']['file'] = 'entity_crud_ui_patch_node.module';
+  $menu['node/%node/revisions']['module'] = 'entity_crud_ui_patch_node';
+
+}

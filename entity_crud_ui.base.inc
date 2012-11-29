@@ -1,0 +1,477 @@
+<?php
+
+class EntityCRUDUIBase {
+
+  private $info;
+  private $type;
+
+  public function __construct($entity_type) {
+    $this->type = $entity_type;
+    $this->info = entity_get_info($entity_type);
+  }
+
+  public function access($operation, $entity_bundle = NULL) {
+    $entity = $entity_bundle;
+    // entity_access handles only some cases
+    if (in_array($operation, array('view', 'update', 'delete', 'create'))) {
+      if (!is_object($entity)) {
+        $entity = NULL;
+      }
+      return entity_access($operation, $this->type, $entity);
+    }
+    // custom access handler allows you to handle revision permissions.
+    return $this->customAccess($operation, $entity);
+  }
+
+  public function customAccess($operation, $entity = NULL) {
+    // default to no access (since this is used for revisions mostly)
+    return FALSE;
+  }
+
+  public function supported() {
+    return !!$this->info;
+  }
+
+  public function revisions($entity) {
+    if ((!empty($this->info['revision table']))  && (!empty($this->info['entity keys']['revision']))) {
+      $query = db_select($this->info['revision table'], 'r');
+      $query->fields('r');
+      $query->addField('r', $this->info['entity keys']['revision'], 'revision_id');
+      $query->condition($this->info['entity keys']['id'], $entity->{$this->info['entity keys']['id']});
+      $query->orderBy($this->info['entity keys']['revision'], 'DESC');
+      $this->revisionQueryAlter($entity, $query);
+      $rs = $query->execute();
+      return $rs;
+    }
+    return FALSE;
+  }
+
+  public function getDiffCompareURI($entity, $rev1id, $rev2id) {
+    if (!module_exists('diff')) { return FALSE; }
+    if ($rev1id > $rev2id) {
+      $temp = $rev1id;
+      $rev1id = $rev2id;
+      $rev2id = $temp;
+    }
+    return 'entity/'.$this->type.'/'.$entity->{$this->info['entity keys']['id']}.'/revisions/diff/' . $rev1id . '/' . $rev2id;
+  }
+
+  public function getRevisionHeaders() {
+    return array(
+      'info' => t('Description'),
+    );
+  }
+
+  public function generateDiffView($entity, $revision1, $revision2, $state = NULL) {
+    if (!module_exists('diff')) { return FALSE; }
+    module_load_include('inc', 'diff', 'diff.pages');
+    $build['#attached'] = diff_build_attachments();
+    $default_state = variable_get('diff_default_state_' . $this->type, 'raw');
+    $state = str_replace('-', '_', $state);
+    if ($state && !in_array($state, diff_avaiable_states($this->type))) {
+      $state = $default_state;
+    }
+    if (empty($state)) {
+      $state = $default_state;
+    }
+    $left_entity = $this->load(
+      $revision1->{$this->info['entity keys']['id']},
+      $revision1->{$this->info['entity keys']['revision']}
+    );
+    $right_entity = $this->load(
+      $revision2->{$this->info['entity keys']['id']},
+      $revision2->{$this->info['entity keys']['revision']}
+    );
+    $left_header = $this->buildDiffHeader($left_entity, $revision1);
+    $right_header = $this->buildDiffHeader($right_entity, $revision2);
+    $left_extras = $this->buildDiffExtraData($left_entity, $revision1);
+    $right_extras = $this->buildDiffExtraData($right_entity, $revision2);
+    $extra_keys = array_merge(array_keys($left_extras), array_keys($right_extras));
+
+    $header = _diff_default_header($left_header, $right_header);
+    $rows = array();
+    foreach ($extra_keys as $key) {
+      $rows[$key] = array();
+      $rows[$key][] = array(
+        'data' => isset($left_extras[$key]) ? $left_extras[$key] : '',
+        'colspan' => 2,
+      );
+      $rows[$key][] = array(
+        'data' => isset($right_extras[$key]) ? $right_extras[$key] : '',
+        'colspan' => 2,
+      );
+    }
+    $links = array();
+    foreach (diff_avaiable_states($this->type) as $alt_state => $label) {
+      if ($alt_state != $state) {
+        $links[$alt_state] = array(
+          'title' => $label,
+          'href' => implode('/', array(
+            'entity',
+            $this->type,
+            $entity->{$this->info['entity keys']['id']},
+            'revisions',
+            'diff',
+            $revision1->revision_id,
+            $revision2->revision_id,
+            $alt_state
+          )),
+        );
+      }
+    }
+    $rows = array_merge($rows, $this->buildDiffRows($left_entity, $right_entity, $state));
+    $build['diff_table'] = array(
+      '#theme' => 'table__diff__standard',
+      '#header' => $header,
+      '#rows' => $rows,
+      '#attributes' => array('class' => array('diff')),
+      '#colgroups' => _diff_default_cols(),
+      '#sticky' => FALSE,
+    );
+    return $build;
+  }
+
+  protected function buildDiffRows($left_entity, $right_entity, $state) {
+    if (!module_exists('diff')) { return FALSE; }
+    static $table_row_counter = 0;
+    if ($theme = variable_get('diff_theme', 'default')) {
+      drupal_add_css(drupal_get_path('module', 'diff') . 'css/diff.' . $theme . '.css');
+    }
+    $this->prediff();
+    $rows = array();
+    $any_visible_change = FALSE;
+    $context = array(
+      'entity_type' => $this->type,
+      'states' => array($state),
+    );
+    $diffs = diff_compare_entities($left_entity, $right_entity, $context);
+    $line_stats = array(
+      'counter' => array('x' => 0, 'y' => 0),
+      'offset' => array('x' => 0, 'y' => 0),
+    );
+    foreach ($diffs as $diff) {
+      $show_header = !empty($diff['#name']);
+      if ($show_header && isset($diff['#settings']['show_header'])) {
+        $show_header = $show_header && $diff['#settings']['show_header'];
+      }
+      if (empty($diff['#settings']['line_counter'])) {
+        $line_counter = FALSE;
+      } else {
+        $line_counter = $diff['#settings']['line_counter'];
+      }
+      if ($line_counter) {
+        $line_stats['counter']['x'] = 0;
+        $line_stats['counter']['y'] = 0;
+        if ($line_counter == 'line' && 0) {
+          $line_stats['offset']['x'] = 0;
+          $line_stats['offset']['y'] = 0;
+        }
+        $line_stats_ref = $line_stats;
+      } else {
+        $line_stats_ref = NULL;
+      }
+      list($old, $new) = diff_extract_state($diff, $state);
+      if ($diff_rows = diff_get_rows($old, $new, $line_counter && $line_counter != 'hidden', $line_stats_ref)) {
+        if ($line_counter && $line_counter != 'line') {
+          $line_stats['offset']['x'] += $line_stats_ref['counter']['x'];
+          $line_stats['offset']['y'] += $line_stats_ref['counter']['y'];
+        }
+        if ($show_header) {
+          $rows['diff-header-' . $table_row_counter++] = array(
+            array(
+              'data' => t('Changes to %name', array('%name' => $diff['#name'])),
+              'class' => 'diff-section-title',
+              'colspan' => 4,
+            ),
+          );
+        }
+        foreach ($diff_rows as $row) {
+          $rows['diff-row-' . $table_row_counter++] = $row;
+        }
+        $any_visible_change = TRUE;
+      }
+    }
+    if (!$any_visible_change) {
+      $rows['diff-empty-' . $table_row_counter++] = array(
+        array(
+          'data' => t('No visible changes'),
+          'class' => 'diff-section-title',
+          'colspan' => 4,
+        ),
+      );
+    }
+    $rows['diff-empty-' . $table_row_counter++] = array(
+      array('data' => ''),
+      array('data' => ''),
+      array('data' => ''),
+      array('data' => ''),
+    );
+    return $rows;
+  }
+
+  protected function prediff() {}
+
+  public function buildDiffHeader($entity, $revision) {
+    var_dump($revision);
+    if ((!empty($revision->timestamp)) && (!empty($revision->uid))) {
+      $user = user_load($revision->uid);
+      return t('!date by !username', array(
+        '!date' => l(
+          format_date($revision->timestamp),
+          $this->revisionURI($entity, $revision, 'view')
+        ),
+        '!username' => theme('username', array('account' => $revision)),
+      ));
+    } else {
+      drupal_set_message(t('You should override !function for !type', array(
+        '!function' => 'buildDiffHeader',
+        '!type' => $this->type,
+      )));
+      return t('No Diff Header');
+    }
+  }
+
+  public function buildDiffExtraData($entity, $revision) {
+    $extras = array();
+    if (isset($revision->log)) {
+      $extras['log'] = '<p class="revision-log">' . filter_xss($revision->log) . '</p>';
+    }
+    return $extras;
+  }
+
+  public function getRevisionData($entity, $revision) {
+    $content = array();
+    if (!empty($revision->timestamp)) {
+      $content[] = t('Authored: %time', array('%time' => format_date($revision->timestamp, 'full')));
+    }
+    if (!empty($revision->uid)) {
+      $user = user_load($revision->uid);
+      if (!empty($user)) {
+        $content[] = t('Authored By: %username', array('%username' => $user->name));
+      }
+    }
+    if (!empty($revision->log)) {
+      $content[] = '<p class="revision-log">' . $revision->log . '</p>';
+    }
+    if (!count($content)) {
+      $content[] = t('You must override the getRevisionData method in order to get sensible revision data');
+    }
+    return array(
+      'info' => implode('<br />', $content),
+    );
+  }
+
+  protected function revisionQueryAlter($entity, &$query) {
+
+  }
+
+  public function revisionURI($entity, $revision, $op = NULL) {
+    if (!in_array($op, array('revert', 'delete'))) {
+      $op = NULL;
+    }
+    if (!empty($op)) {
+      return 'entity/' . $this->type . '/' . $entity->{$this->info['entity keys']['id']} . '/revisions/' . $revision->{$this->info['entity keys']['revision']} . '/' . $op;
+    } else {
+      return 'entity/' . $this->type . '/' . $entity->{$this->info['entity keys']['id']} . '/revisions/' . $revision->{$this->info['entity keys']['revision']};
+    }
+  }
+
+  public function uri($entity, $op = NULL) {
+    if (!in_array($op, array('delete', 'edit', 'revisions'))) {
+      $op = NULL;
+    }
+    if (empty($op)) {
+      return 'entity/' . $this->type . '/' . $entity->{$this->info['entity keys']['id']};
+    } else {
+      return 'entity/' . $this->type . '/' . $entity->{$this->info['entity keys']['id']} . '/' . $op;
+    }
+  }
+
+  public function newObject($bundle_type = NULL) {
+    $bundle_key = $this->info['entity keys']['bundle'];
+    $object = entity_create($this->type, array(
+      $bundle_key => $bundle_type,
+    ));
+    $this->initializeEntity($object);
+    $modules = module_implements('entity_crud_ui_' . $this->type . '_create_object');
+    foreach ($modules as $module) {
+      $function = $module . '_entity_crud_ui_' . $this->type . '_create_object';
+      if (function_exists($function)) {
+        $function($object);
+      }
+    }
+    return $object;
+  }
+
+  public function prepareObject(&$object) {
+    $object->revision = 0;
+    $modules = module_implements($this->type . '_prepare');
+    foreach ($modules as $module) {
+      $function = $module . '_' . $this->type . '_prepare';
+      if (function_exists($function)) {
+        $function($object);
+      }
+    }
+    $modules = module_implements('entity_crud_ui_' . $this->type . '_prepare');
+    foreach ($modules as $module) {
+      $function = $module . '_entity_crud_ui_' . $this->type . '_prepare';
+      if (function_exists($function)) {
+        $function($object);
+      }
+    }
+  }
+
+  public function getLabel() {
+    return $this->info['label'];
+  }
+
+  public function getType() {
+    return $this->type;
+  }
+
+  public function getBundles() {
+    return $this->info['bundles'];
+  }
+
+  public function initializeEntity(&$entity) {
+
+  }
+
+  public function alterForm(&$form, &$form_state, $entity, $langcode = 'und') {
+    $fields = $this->getPropertyFields($entity, $langcode);
+    $modules = module_implements('entity_crud_ui_'.$this->type.'_properties_alter');
+    foreach ($modules as $module) {
+      $function = $module . '_entity_crud_ui_'.$this->type.'_properties_alter';
+      if (function_exists($function)) {
+        $function($entity, $fields, $langcode);
+      }
+    }
+    $form += $fields;
+  }
+
+
+
+  public function getPropertyFields($entity, $langcode = 'und') {
+    return array();
+  }
+
+  public function getFormActions() {
+    return array();
+  }
+
+  public function formValidate($entity, $form, &$form_state) {
+    return TRUE;
+  }
+
+  public function propertyAttach(&$entity, $form, &$form_state) {
+    $modules = module_implements('entity_crud_ui_' . $this->type . '_properties_attach');
+    foreach ($modules as $module) {
+      $function = $module . '_entity_crud_ui_' . $this->type . '_properties_attach';
+      if (function_exists($function)) {
+        $function($form, $form_state, $entity);
+      }
+    }
+  }
+
+  public function presave(&$entity) {
+  }
+
+  public function save(&$entity) {
+    entity_save($this->type, $entity);
+  }
+
+  public function postsave(&$entity, &$form_state) {
+    foreach (module_implements('entity_crud_ui_postsave') as $module) {
+      $function = $module . '_entity_crud_ui_postsave';
+      if (function_exists($function)) {
+        $function($this->type, $entity);
+      }
+    }
+    foreach (module_implements('entity_crud_ui_' . $this->type . '_postsave') as $module) {
+      $function = $module . '_entity_crud_ui_' . $this->type . '_postsave';
+      if (function_exists($function)) {
+        $function($entity);
+      }
+    }
+    drupal_set_message(t('Entity saved successfully!'));
+    $form_state['redirect'] = 'entity/' . $this->type . '/' . $entity->{$this->info['entity keys']['id']};
+  }
+
+  public function load($entity_id, $version_id = NULL) {
+    if (empty($version_id) || empty($this->info['entity keys']['revision'])) {
+      return reset(entity_load($this->type, array($entity_id)));
+    } else {
+      $vkey = $this->info['entity keys']['revision'];
+      return reset(entity_load($this->type, array($entity_id), array(
+        $vkey => $version_id,
+      )));
+    }
+  }
+
+  public function vidLoad($version_id) {
+    if ((!empty($this->info['revision table']))  && (!empty($this->info['entity keys']['revision']))) {
+      $query = db_select($this->info['revision table'], 'r');
+      $query->fields('r');
+      $query->addField('r', $this->info['entity keys']['revision'], 'revision_id');
+      $query->condition($this->info['entity keys']['revision'], $version_id);
+      $rs = $query->execute();
+      return $rs->fetchObject();
+    }
+    return FALSE;
+  }
+
+  public function entityByVID($version) {
+    if (empty($this->info['entity keys']['revision'])) {
+      return FALSE;
+    }
+    return $this->load(
+      $version->{$this->info['entity keys']['id']},
+      $version->{$this->info['entity keys']['revision']}
+    );
+  }
+
+  public function view($entity, $view_mode = 'full', $lang = NULL) {
+    global $language;
+    if (empty($lang)) {
+      $lang = $language->language;
+    }
+    return entity_view($this->type, array($entity), $view_mode, $lang);
+  }
+
+  public function delete($entity) {
+    entity_delete($this->type, $entity->{$this->info['entity keys']['id']});
+  }
+
+  public function label($entity) {
+    return entity_label($this->type, $entity);
+  }
+
+  public function revert($entity, $revision) {
+    $ventity = $this->entityByVID($revision);
+    if ($ventity->{$this->info['entity keys']['revision']} ==
+      $entity->{$this->info['entity keys']['revision']}) {
+        // let's not harass the database if we're reverting to the current version
+        return TRUE;
+    }
+    $this->save($ventity);
+  }
+
+  public function deleteRevision($entity, $revision) {
+    $ventity = $this->entityByVID($revision);
+    if (!$ventity) {
+      return FALSE;
+    }
+    if ($ventity->{$this->info['entity keys']['revision']} ==
+      $entity->{$this->info['entity keys']['revision']}) {
+        return FALSE;
+    }
+    db_delete($this->info['revision table'])
+        ->condition($this->info['entity keys']['id'], $ventity->{$this->info['entity keys']['id']})
+        ->condition($this->info['entity keys']['revision'], $ventity->{$this->info['entity keys']['revision']})
+        ->execute();
+    module_invoke_all($this->type . '_revision_delete', $ventity);
+    field_attach_delete_revision($this->type, $ventity);
+    return TRUE;
+  }
+
+}

@@ -1,0 +1,297 @@
+<?php
+
+/* Included here to add hooks for all the polyfills we need to be
+ * backwards compatible. */
+module_load_include('inc', 'entity_crud_ui', 'entity_crud_ui.polyfill');
+
+/**
+ * Implements hook_ctools_plugin_type().
+ */
+function entity_crud_ui_ctools_plugin_type() {
+  return array(
+    'entity_crud' => array(
+      'use hooks' => TRUE,
+    )
+  );
+}
+
+/**
+ * Implements hook_ctools_plugin_directory().
+ */
+function entity_crud_ui_ctools_plugin_directory($module, $plugin) {
+  return 'plugins/' . $plugin;
+}
+
+/**
+ * Checks whether or not the user has access to perform an operation on an
+ * entity.
+ *
+ * @param string $operation Name of the operation. Supported values are: create,
+ *   update, delete, view, revision view, revision update, revision delete.
+ * @param EntityCRUDUIBase $entity_type The entity CRUD controller for this
+ *   type. Will be NULL for access to the list of entity types.
+ * @param string|stdClass $bundle Either the name of the bundle (for create) or
+ *   the entity object (for other modes). Will be NULL for access to the list of
+ *   entity types, or the list of entities or the entity create list before a
+ *   bundle has been picked.
+ * @return boolean TRUE if the user has access, otherwise FALSE.
+ */
+function entity_crud_ui_access($operation, $entity_type = NULL, $entity_bundle = NULL) {
+  if (empty($entity_type)) {
+    // @todo we need permissions for this case
+    return TRUE;
+  }
+  // this method normally leverages entity_access().
+  return $entity_type->access($operation, $entity_bundle);
+}
+
+/**
+ * Returns the title for adding an entity.
+ *
+ * @param EntityCRUDUIBase $entity_type The entity CRUD controller.
+ * @return string The page title.
+ */
+function entity_crud_ui_add_title($entity_type) {
+  return t('Add !type', array('!type' => $entity_type->getLabel()));
+}
+
+/**
+ * Implements hook_admin_paths().
+ */
+function entity_crud_ui_admin_paths() {
+  $paths = array(
+    'entity' => TRUE,
+    'entity/*' => TRUE,
+    'entity/*/*' => FALSE,
+    'entity/*/add' => TRUE,
+    'entity/*/*/*' => TRUE,
+  );
+  return $paths;
+}
+
+/**
+ * Implements hook_menu().
+ */
+function entity_crud_ui_menu() {
+  return array(
+    'entity/%entity_crud_ui_type/add' => array(
+      'title callback' => 'entity_crud_ui_add_title',
+      'title arguments' => array(1),
+      'page callback' => 'entity_crud_ui_create_entity_list',
+      'page arguments' => array(1),
+      'access callback' => 'entity_crud_ui_access',
+      'access arguments' => array('create', 1),
+      'file' => 'entity_crud_ui.pages.inc',
+      'type' => MENU_NORMAL_ITEM,
+    ),
+    'entity/%entity_crud_ui_type/%entity_crud_ui_bundle/add' => array(
+      'title callback' => 'entity_crud_ui_add_title',
+      'title arguments' => array(1),
+      'load arguments' => array(1),
+      'page callback' => 'entity_crud_ui_create_entity',
+      'page arguments' => array(1, 2),
+      'access callback' => 'entity_crud_ui_access',
+      'access arguments' => array('create', 1, 2),
+      'file' => 'entity_crud_ui.pages.inc',
+      'type' => MENU_CALLBACK,
+    ),
+    'entity/%entity_crud_ui_type/%entity_crud_ui_id' => array(
+      'title callback' => 'entity_crud_ui_get_title',
+      'title arguments' => array(1, 2),
+      'load arguments' => array(1),
+      'page callback' => 'entity_crud_ui_view_entity',
+      'page arguments' => array(1, 2),
+      'access callback' => 'entity_crud_ui_access',
+      'access arguments' => array('view', 1, 2),
+      'file' => 'entity_crud_ui.pages.inc',
+      'type' => MENU_CALLBACK | MENU_NORMAL_ITEM,
+    ),
+    'entity/%entity_crud_ui_type/%entity_crud_ui_id/view' => array(
+      'title' => 'View',
+      'weight' => -100,
+      'type' => MENU_DEFAULT_LOCAL_TASK,
+      'load arguments' => array(1),
+    ),
+    'entity/%entity_crud_ui_type/%entity_crud_ui_id/edit' => array(
+      'title' => 'Edit',
+      'type' => MENU_LOCAL_TASK,
+      'load arguments' => array(1),
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('entity_crud_ui_entity_form', 1, 2),
+      'access callback' => 'entity_crud_ui_access',
+      'access arguments' => array('update', 1, 2),
+      'file' => 'entity_crud_ui.pages.inc',
+      'type' => MENU_LOCAL_TASK,
+    ),
+    'entity/%entity_crud_ui_type/%entity_crud_ui_id/delete' => array(
+      'title' => 'Delete',
+      'type' => MENU_CALLBACK,
+      'load arguments' => array(1),
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('entity_crud_ui_entity_delete_form', 1, 2),
+      'access callback' => 'entity_crud_ui_access',
+      'access arguments' => array('delete', 1, 2),
+      'file' => 'entity_crud_ui.pages.inc',
+    ),
+    'entity/%entity_crud_ui_type/%entity_crud_ui_id/revisions' => array(
+      'title' => 'Revisions',
+      'type' => MENU_LOCAL_TASK,
+      'load arguments' => array(1),
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('entity_crud_ui_entity_revision_form', 1, 2),
+      'access callback' => 'entity_crud_ui_access',
+      'access arguments' => array('revision view', 1, 2),
+      'file' => 'entity_crud_ui.pages.inc',
+    ),
+    'entity/%entity_crud_ui_type/%entity_crud_ui_id/revisions/%entity_crud_ui_vid' => array(
+      'title' => 'View Revision',
+      'load arguments' => array(1),
+      'page callback' => 'entity_crud_ui_view_revision',
+      'page arguments' => array(1, 2, 4),
+      'access callback' => 'entity_crud_ui_access',
+      'access arguments' => array('revision view', 1, 2),
+      'file' => 'entity_crud_ui.pages.inc',
+    ),
+    'entity/%entity_crud_ui_type/%entity_crud_ui_id/revisions/diff/%entity_crud_ui_vid/%entity_crud_ui_vid' => array(
+      'title' => 'Compare Revisions',
+      'load arguments' => array(1),
+      'page callback' => 'entity_crud_ui_view_revision_diff',
+      'page arguments' => array(1, 2, 5, 6),
+      'access callback' => 'entity_crud_ui_access',
+      'access arguments' => array('revision view', 1, 2),
+      'file' => 'entity_crud_ui.pages.inc',
+    ),
+    'entity/%entity_crud_ui_type/%entity_crud_ui_id/revisions/diff/%entity_crud_ui_vid/%entity_crud_ui_vid/%' => array(
+      'title' => 'Compare Revisions',
+      'load arguments' => array(1),
+      'page callback' => 'entity_crud_ui_view_revision_diff',
+      'page arguments' => array(1, 2, 5, 6, 7),
+      'access callback' => 'entity_crud_ui_access',
+      'access arguments' => array('revision view', 1, 2),
+      'file' => 'entity_crud_ui.pages.inc',
+    ),
+    'entity/%entity_crud_ui_type/%entity_crud_ui_id/revisions/%entity_crud_ui_vid/revert' => array(
+      'title' => 'Revert Revision',
+      'load arguments' => array(1),
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('entity_crud_ui_revert_revision_form', 1, 2, 4),
+      'access callback' => 'entity_crud_ui_access',
+      'access arguments' => array('revision update', 1, 2),
+      'file' => 'entity_crud_ui.pages.inc',
+    ),
+    'entity/%entity_crud_ui_type/%entity_crud_ui_id/revisions/%entity_crud_ui_vid/delete' => array(
+      'title' => 'Delete Revision',
+      'load arguments' => array(1),
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('entity_crud_ui_delete_revision_form', 1, 2, 4),
+      'access callback' => 'entity_crud_ui_access',
+      'access arguments' => array('revision delete', 1, 2),
+      'file' => 'entity_crud_ui.pages.inc',
+    ),
+  );
+}
+
+/**
+ * Load callback method for loading a revision object.
+ *
+ * @param int $version_id The revision ID to load.
+ * @param string $entity_type Name of the entity type.
+ * @return stdClass|FALSE The revision object, or FALSE if none was found. This
+ *   is a stdClass of all the information in the revision table, NOT the entity
+ *   information.
+ */
+function entity_crud_ui_vid_load($version_id, $entity_type) {
+  // CRUD controller is not loaded yet, so let's load it.
+  $entity_type = entity_crud_ui_type_load($entity_type);
+  if (empty($entity_type)) {
+    return FALSE;
+  }
+  return $entity_type->vidLoad($version_id);
+}
+
+/**
+ * Callback to get the title of an entity.
+ *
+ * @param EntityCRUDUIBase $entity_type The entity CRUD controller.
+ * @param stdClass $entity The entity to get the title of.
+ * @return string The title of the entity.
+ */
+function entity_crud_ui_get_title($entity_type, $entity) {
+  return $entity_type->label($entity);
+}
+
+/**
+ * Callback to load a bundle type
+ * @param string $bundle_name Name of the bundle
+ * @param string $entity_type Name of the entity
+ * @return string|FALSE The bundle name if found, otherwise FALSE.
+ */
+function entity_crud_ui_bundle_load($bundle_name, $entity_type) {
+  $bundle_name = str_replace('-', '_', $bundle_name);
+  $plugin = entity_crud_ui_type_load($entity_type);
+  if (empty($plugin)) {
+    return FALSE;
+  }
+  $bundles = $plugin->getBundles();
+  if (!empty($bundles[$bundle_name])) {
+    return $bundle_name;
+  }
+  return FALSE;
+}
+
+/**
+ * Loads the entity type CRUD controller.
+ *
+ * @param string $entity_type The entity type.
+ * @return EntityCRUDUIBase|FALSE An instance of EntityCRUDUIBase, or one of
+ *   it's subclasses, or FALSE if no controller was found.
+ */
+function entity_crud_ui_type_load($entity_type) {
+  $entity_type = str_replace('-', '_', $entity_type);
+  ctools_include('plugins');
+  $plugins = ctools_get_plugins('entity_crud_ui', 'entity_crud');
+  $controller = NULL;
+  if (isset($plugins[$entity_type])) {
+    if (class_exists($plugins[$entity_type]['handler']['class'])) {
+      $controller = new $plugins[$entity_type]['handler']['class'];
+    }
+  }
+  if (empty($controller)) {
+    $controller = new EntityCRUDUIBase($entity_type);
+  }
+  if ($controller->supported()) {
+    return $controller;
+  }
+  return FALSE;
+}
+
+/**
+ * Loads an entity by it's ID.
+ *
+ * @param int $entity_id The id of the entity
+ * @param string $entity_type The type of the entity
+ * @return stdClass The entity.
+ */
+function entity_crud_ui_id_load($entity_id, $entity_type) {
+  $entity_type = entity_crud_ui_type_load($entity_type);
+  return $entity_type->load($entity_id);
+}
+
+/**
+ * AJAX callback function for changing the language on the form.
+ */
+function entity_crud_ui_reload_language($form, &$form_state) {
+  return $form['language-dependent'];
+}
+
+/**
+ * Implements hook_theme().
+ */
+function entity_crud_ui_theme() {
+  return array(
+    'entity_crud_ui_revisions' => array(
+      'render element' => 'form',
+      'file' => 'entity_crud_ui.theme.inc',
+    )
+  );
+}
