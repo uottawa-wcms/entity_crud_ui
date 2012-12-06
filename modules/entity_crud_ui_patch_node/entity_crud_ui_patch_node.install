@@ -1,0 +1,13 @@
+<?php
+
+function entity_crud_ui_patch_node_install() {
+  $weight = db_select('system', 's')
+      ->fields('s', array('weight'))
+      ->condition('name', 'i18n_node')
+      ->execute()
+      ->fetchField();
+  db_update('system')
+      ->fields(array('weight' => $weight + 10))
+      ->condition('name', 'entity_crud_ui_patch_node')
+      ->execute();
+}

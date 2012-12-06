@@ -8,3 +8,10 @@ files[] = plugins/entity_crud/node.inc
 
 dependencies[] = ctools
 dependencies[] = entity
+
+
+; Information added by drush on 2012-12-05
+version = "unknown"
+project = "entity_crud_ui"
+datestamp = "1354734569"
+
