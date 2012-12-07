@@ -35,7 +35,7 @@ class EntityCRUDUINode extends EntityCRUDUIBase {
     $entity->name = $user->name;
   }
 
-  public function getPropertyFields($entity, $langcode) {
+  public function getPropertyFields($entity, $langcode = 'und') {
     $form = array(
       'title' => array(
         '#title' => t('Title'),
