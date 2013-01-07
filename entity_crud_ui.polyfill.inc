@@ -14,6 +14,11 @@ if (module_exists('title')) {
       }
     }
   }
+  if (!function_exists('title_entity_crud_ui_node_properties_attach')) {
+    function title_entity_crud_ui_node_properties_attach($form, &$form_state, &$entity) {
+      title_entity_sync($entity->entity_type->getType(), $entity);
+    }
+  }
 }
 
 if (module_exists('comment')) {

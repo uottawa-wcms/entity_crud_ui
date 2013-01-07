@@ -8,3 +8,10 @@ version = "unknown"
 project = "entity_crud_ui"
 datestamp = "1354734569"
 
+
+
+; Information added by drush on 2013-01-03
+version = "unknown"
+project = "entity_crud_ui"
+datestamp = "1357223963"
+
