@@ -338,6 +338,7 @@ class EntityCRUDUIBase {
   }
 
   public function alterForm(&$form, &$form_state, $entity, $langcode = 'und') {
+    $entity->entity_type = $this->type;
     $fields = $this->getPropertyFields($entity, $langcode);
     $modules = module_implements('entity_crud_ui_'.$this->type.'_properties_alter');
     foreach ($modules as $module) {

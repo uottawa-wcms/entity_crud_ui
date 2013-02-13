@@ -62,7 +62,7 @@ function entity_crud_ui_admin_paths() {
   $paths = array(
     'entity' => TRUE,
     'entity/*' => TRUE,
-    'entity/*/*' => FALSE,
+    'entity/*/*' => TRUE,
     'entity/*/add' => TRUE,
     'entity/*/*/*' => TRUE,
   );

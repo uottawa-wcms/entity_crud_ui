@@ -1,0 +1,154 @@
+<?php
+
+function entity_path_get_path_settings($entity_type, $entity, $langcode = NULL) {
+  $conditions = array();
+  // generic language code
+  if (empty($langcode)) {
+    $langcode = entity_language($entity_type, $entity);
+  }
+  $conditions['language'] = $langcode;
+  // generic path condition
+  $type = entity_get_info($entity_type);
+  $has_id = !empty($entity->{$type['entity keys']['id']});
+  if ($has_id) {
+    $uri = entity_uri($entity_type, $entity);
+    $conditions['source'] = $uri['path'];
+    //// find the path
+    $path = path_load($conditions);
+  }
+  $pathauto = FALSE;
+  // no path means empty set of options
+  if (empty($path)) {
+    $path = array();
+    $pathauto = module_exists('pathauto');
+  } elseif ($has_id && module_exists('pathauto')) {
+    module_load_include('inc', 'pathauto');
+    $alias = pathauto_create_alias($entity_type, 'return', $uri['path'], array($entity_type => $entity), $entity->{$type['entity keys']['bundle']}, $langcode);
+    if ($alias == $path['alias']) {
+      $pathauto = TRUE;
+    }
+  }
+  return $path += array(
+    'pid' => NULL,
+    'source' => $has_id ? $uri['path'] : NULL,
+    'alias' => '',
+    'language' => !empty($langcode) ? $langcode : LANGUAGE_NONE,
+    'pathauto' => $pathauto
+  );
+}
+
+function entity_path_form_element_validate($element, &$form_state, $complete_form) {
+  // Trim the submitted value.
+  foreach ($form_state['values']['extended_path'] as $langcode => $path) {
+    $alias = trim($path['alias']);
+    if (!empty($alias)) {
+      // Ensure that the submitted alias does not exist yet.
+      $query = db_select('url_alias')
+        ->condition('alias', $path['alias'])
+        ->condition('language', $path['language']);
+      if (!empty($path['source'])) {
+        $query->condition('source', $path['source'], '<>');
+      }
+      $query->addExpression('1');
+      $query->range(0, 1);
+      if ($query->execute()->fetchField()) {
+        form_error($element, t('The alias is already in use.'));
+      }
+    }
+  }
+}
+
+function entity_path_node_update($node) {
+  if (isset($node->extended_path)) {
+    foreach ($node->extended_path as $langcode => $path) {
+      $path['alias'] = trim($path['alias']);
+      if (module_exists('pathauto')) {
+        if (!empty($path['pathauto'])) {
+          module_load_include('inc', 'pathauto');
+          $path['alias'] = pathauto_create_alias('node', 'return', 'node/' . $node->nid,
+              array('node' => $node), $node->type, $langcode);
+        }
+      }
+      if (!empty($path['pid']) && empty($path['alias'])) {
+        path_delete($path['pid']);
+      }
+    }
+    entity_path_node_insert($node);
+  }
+}
+
+function entity_path_node_insert($node) {
+  if (isset($node->extended_path)) {
+    foreach ($node->extended_path as $langcode => $path) {
+      $path['alias'] = trim($path['alias']);
+      if (module_exists('pathauto')) {
+        if (!empty($path['pathauto'])) {
+          module_load_include('inc', 'pathauto');
+          $path['alias'] = pathauto_create_alias('node', 'return', 'node/' . $node->nid,
+              array('node' => $node), $node->type, $langcode);
+        }
+      }
+      if (!empty($path['alias'])) {
+        $path['source'] = 'node/' . $node->nid;
+        $path['language'] = $langcode;
+        path_save($path);
+      }
+    }
+  }
+}
+
+function entity_path_entity_crud_ui_node_properties_attach($form, &$form_state, &$entity) {
+  $entity->extended_path = $form_state['values']['extended_path'];
+  // prevent standard aliasing and pathauto from operating
+  $entity->path = array('pathauto' => FALSE, 'alias' => '');
+}
+
+function entity_path_entity_crud_ui_node_properties_alter($entity, &$properties, $langcode) {
+  $entity->path = entity_path_get_path_settings($entity->entity_type, $entity, $langcode);
+  $properties['extended_path'] = array(
+    '#type' => 'container',
+    '#access' => user_access('create url aliases') || user_access('administer url aliases'),
+    '#tree' => TRUE,
+    '#language' => $langcode,
+    '#element_validate' => array('entity_path_form_element_validate'),
+  );
+  $properties['extended_path'] += array(
+    $langcode => array(
+      '#title' => t('Path Settings'),
+      '#collapsible' => TRUE,
+      '#collapsed' => empty($entity->path['alias']),
+      '#attributes' => array('class' => array('path-form')),
+      '#type' => 'fieldset',
+      'alias' => array(
+        '#type' => 'textfield',
+        '#title' => t('URL Alias'),
+        '#default_value' => $entity->path['alias'],
+        '#maxlength' => 255,
+        '#description' => t('Optionally specify an alternative URL by which this content can be accessed. For example, type "about" when writing an about page. Use a relative path and don\'t add a trailing slash or the URL alias won\'t work.'),
+      ),
+      'pid' => array(
+        '#type' => 'value',
+        '#value' => $entity->path['pid'],
+      ),
+      'source' => array(
+        '#type' => 'value',
+        '#value' => $entity->path['source'],
+      ),
+      'language' => array(
+        '#type' => 'value',
+        '#value' => $entity->path['language'],
+      ),
+    ),
+  );
+  if (module_exists('pathauto')) {
+    $properties['extended_path'][$langcode]['pathauto'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Automatically generate a path'),
+      '#default_value' => $entity->path['pathauto'],
+      '#weight' => -100,
+    );
+    $properties['extended_path'][$langcode]['alias']['#states']['!enabled']['input[name="extended_path['.$langcode.'][pathauto]"]'] = array('checked' => TRUE);
+  }
+}
+
+

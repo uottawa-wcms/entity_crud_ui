@@ -1,0 +1,7 @@
+name = Entity Path
+description = "Replaces some functionality of the path module with more appropriate
+tools for Entity CRUD UI"
+core = 7.x
+
+dependencies[] = entity_crud_ui
+dependencies[] = path
