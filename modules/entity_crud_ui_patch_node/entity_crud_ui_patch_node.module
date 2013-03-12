@@ -1,5 +1,16 @@
 <?php
 
+/* How do we expose the entity/node/add to non admin through permissions??
+function hook_permission() {
+  return array(
+    'Entity CRUD UI Admin' => array(
+      'title' => t('Administer Entity CRUD UI Access'),
+      'description' => t('Perform administration tasks for entity crud UI.'),
+    ),
+  );
+}
+*/
+
 function entity_crud_ui_patch_node_redirect_link($op, $first_arg = NULL) {
   $destination = NULL;
   switch ($op) {
