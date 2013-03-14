@@ -14,13 +14,12 @@ class EntityCRUDUIBase {
     if ($operation == 'create' && $this->type == 'node' && empty($entity_bundle)) {
       return _node_add_access();
     }
-    if ($operation == 'create' && $this->type == 'node') {
-      return node_access('create', $entity_bundle);
-    }
     $entity = $entity_bundle;
     // entity_access handles only some cases
     if (in_array($operation, array('view', 'update', 'delete', 'create'))) {
-     if (!is_object($entity)) { $entity = NULL; }
+      if (!is_object($entity)) {
+        $entity = NULL;
+      }
       return entity_access($operation, $this->type, $entity);
     }
     // custom access handler allows you to handle revision permissions.
@@ -334,18 +333,7 @@ class EntityCRUDUIBase {
   }
 
   public function getBundles() {
-    $bundles = $this->info['bundles'];
-    $open_bundles = array();
-    foreach ($bundles as $bundle_key => $bundle_info) {
-      if ($this->type == 'node') {
-        if (node_access('create', $bundle_key)) {
-          $open_bundles[$bundle_key] = $bundle_info;
-        }
-      } else {
-        $open_bundles[$bundle_key] = $bundle_info;
-      }
-    }
-    return $open_bundles;
+    return $this->info['bundles'];
   }
 
   public function initializeEntity(&$entity) {
